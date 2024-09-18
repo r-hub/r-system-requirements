@@ -1,8 +1,8 @@
 {
-  "patterns": ["\\bcmake\\b"],
+  "patterns": ["\\bPoppler glib\\b"],
   "dependencies": [
     {
-      "packages": ["cmake"],
+      "packages": ["libpoppler-glib-dev"],
       "constraints": [
         {
           "os": "linux",
@@ -15,21 +15,17 @@
       ]
     },
     {
-      "packages": ["cmake"],
+      "packages": ["poppler-glib-devel"],
       "constraints": [
         {
           "os": "linux",
           "distribution": "centos",
-          "versions": ["8"]
-        },
-        {
-          "os": "linux",
-          "distribution": "rockylinux"
+          "versions": ["7"]
         },
         {
           "os": "linux",
           "distribution": "redhat",
-          "versions": ["8", "9"]
+          "versions": ["7"]
         },
         {
           "os": "linux",
@@ -38,37 +34,50 @@
       ]
     },
     {
-      "packages": ["cmake", "cmake3"],
+      "packages": ["poppler-glib-devel"],
       "pre_install": [
-        {
-          "command": "yum install -y epel-release"
-        }
+        { "command": "dnf install -y dnf-plugins-core" },
+        { "command": "dnf config-manager --set-enabled crb" }
       ],
       "constraints": [
         {
           "os": "linux",
-          "distribution": "centos",
-          "versions": ["7"]
+          "distribution": "rockylinux"
         }
       ]
     },
     {
-      "packages": ["cmake", "cmake3"],
+      "packages": ["poppler-glib-devel"],
       "pre_install": [
         {
-          "command": "rpm -q epel-release || yum install -y https://archives.fedoraproject.org/pub/archive/epel/7/x86_64/Packages/e/epel-release-7-14.noarch.rpm"
+          "command": "subscription-manager repos --enable codeready-builder-for-rhel-8-$(arch)-rpms"
         }
       ],
       "constraints": [
         {
           "os": "linux",
           "distribution": "redhat",
-          "versions": ["7"]
+          "versions": ["8"]
         }
       ]
     },
     {
-      "packages": ["cmake"],
+      "packages": ["poppler-glib-devel"],
+      "pre_install": [
+        {
+          "command": "subscription-manager repos --enable codeready-builder-for-rhel-9-$(arch)-rpms"
+        }
+      ],
+      "constraints": [
+        {
+          "os": "linux",
+          "distribution": "redhat",
+          "versions": ["9"]
+        }
+      ]
+    },
+    {
+      "packages": ["libpoppler-glib-devel"],
       "constraints": [
         {
           "os": "linux",
@@ -81,7 +90,7 @@
       ]
     },
     {
-      "packages": ["cmake"],
+      "packages": ["poppler-glib"],
       "constraints": [
         {
           "os": "linux",
