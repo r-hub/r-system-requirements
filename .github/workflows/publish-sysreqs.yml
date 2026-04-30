@@ -1,0 +1,143 @@
+name: Publish System Requirements
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'rules/**'
+      - 'scripts/**'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Generate bundle but do not upload'
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  S3_BUCKET: ${{ secrets.MANIFEST_BUCKET }}
+  S3_PREFIX: sysreqs/v1
+  MANIFEST_URL: https://rspm-sync.rstudio.com
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Test rules
+        run: |
+          npm install
+          npm test
+
+      - name: Create rules bundle
+        run: |
+          GIT_SHA=$(git rev-parse HEAD)
+          echo "Git SHA: ${GIT_SHA}"
+
+          # Create staging directory
+          STAGING_DIR=$(mktemp -d)
+          BUNDLE_DIR="${STAGING_DIR}/rstudio-sysreqs-rules"
+          mkdir -p "${BUNDLE_DIR}"
+
+          # Copy rules, scripts, and license
+          cp -r rules/* "${BUNDLE_DIR}/"
+          if [ -d scripts ]; then
+            mkdir -p "${BUNDLE_DIR}/scripts"
+            cp -r scripts/* "${BUNDLE_DIR}/scripts/" 2>/dev/null || true
+          fi
+          cp LICENSE "${BUNDLE_DIR}/LICENSE"
+
+          # Add git SHA marker inside the archive
+          echo "${GIT_SHA}" > "${BUNDLE_DIR}/latest_git_sha.txt"
+
+          # Create tar archive
+          tar -czvf /tmp/sysreqs.tar.gz -C "${STAGING_DIR}" rstudio-sysreqs-rules
+
+          # Generate checksum
+          CHECKSUM=$(md5sum /tmp/sysreqs.tar.gz | cut -c -32)
+          echo "${GIT_SHA}" > /tmp/latest_git_sha.txt
+          echo "${CHECKSUM}" > /tmp/latest_checksum.txt
+
+          echo "Bundle created: $(ls -lh /tmp/sysreqs.tar.gz)"
+          echo "Checksum: ${CHECKSUM}"
+          echo "Git SHA: ${GIT_SHA}"
+
+          # Expose for later smoke test.
+          echo "GIT_SHA=${GIT_SHA}" >> "$GITHUB_ENV"
+          echo "CHECKSUM=${CHECKSUM}" >> "$GITHUB_ENV"
+
+      - name: Configure AWS credentials
+        if: ${{ inputs.dry_run != true }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload to S3
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          aws s3 cp /tmp/sysreqs.tar.gz "s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/latest.tar.gz"
+          aws s3 cp /tmp/latest_git_sha.txt "s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/latest_git_sha.txt"
+          aws s3 cp /tmp/latest_checksum.txt "s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/latest_checksum.txt"
+          echo "Uploaded sysreqs to s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/"
+
+      - name: Configure AWS credentials (main account for CloudFront)
+        if: ${{ inputs.dry_run != true }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_MAIN_ACCOUNT_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Invalidate CloudFront
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          INV_ID=$(aws cloudfront create-invalidation \
+            --distribution-id "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}" \
+            --paths '/sysreqs/*' \
+            --query 'Invalidation.Id' --output text)
+          echo "Invalidation ID: ${INV_ID}"
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}" \
+            --id "${INV_ID}"
+          echo "Invalidation complete for /sysreqs/* on ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}"
+
+      - name: Verify CDN serves new sysreqs bundle
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          # Confirm the CDN is now serving exactly what we just uploaded.
+          # This catches stale-cache issues and corrupt uploads without needing
+          # to stand up a full PPM instance (sysreqs has no PPM config override
+          # equivalent to Vulnerabilities.ManifestURL today).
+          CDN_SHA=$(curl -fsS "${{ env.MANIFEST_URL }}/sysreqs/v1/latest_git_sha.txt" | tr -d '[:space:]')
+          if [ "${CDN_SHA}" != "${GIT_SHA}" ]; then
+            echo "::error::CDN latest_git_sha.txt (${CDN_SHA}) does not match uploaded SHA (${GIT_SHA})"
+            exit 1
+          fi
+          echo "latest_git_sha.txt matches: ${CDN_SHA}"
+
+          CDN_CHECKSUM=$(curl -fsS "${{ env.MANIFEST_URL }}/sysreqs/v1/latest_checksum.txt" | tr -d '[:space:]')
+          if [ "${CDN_CHECKSUM}" != "${CHECKSUM}" ]; then
+            echo "::error::CDN latest_checksum.txt (${CDN_CHECKSUM}) does not match uploaded checksum (${CHECKSUM})"
+            exit 1
+          fi
+          echo "latest_checksum.txt matches: ${CDN_CHECKSUM}"
+
+          curl -fsS -o /tmp/cdn-sysreqs.tar.gz "${{ env.MANIFEST_URL }}/sysreqs/v1/latest.tar.gz"
+          TARBALL_MD5=$(md5sum /tmp/cdn-sysreqs.tar.gz | cut -c -32)
+          if [ "${TARBALL_MD5}" != "${CHECKSUM}" ]; then
+            echo "::error::CDN tarball md5 (${TARBALL_MD5}) does not match expected checksum (${CHECKSUM})"
+            exit 1
+          fi
+          echo "✓ CDN sync test passed -- ${MANIFEST_URL}/sysreqs/v1/ serves bundle ${GIT_SHA}"
