@@ -1,7 +1,7 @@
-FROM debian:12
+FROM registry.access.redhat.com/ubi9/ubi
 
-RUN apt-get update -qq && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y curl
+RUN dnf upgrade -y -q && \
+    dnf install -y glibc-langpack-en subscription-manager dnf-plugins-core
 
 # Install jq
 RUN curl -fsSL -o /usr/local/bin/jq https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64 && \
