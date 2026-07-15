@@ -7,7 +7,6 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 declare -A os_identifiers=(
     [jammy]='ubuntu'
     [noble]='ubuntu'
-    [bookworm]='debian'
     [trixie]='debian'
     [sid]='debian'
     [centos7]='centos'
@@ -31,7 +30,6 @@ declare -A os_identifiers=(
 declare -A versions=(
     [jammy]='22.04'
     [noble]='24.04'
-    [bookworm]='12'
     [trixie]='13'
     [sid]='unstable'
     [centos7]='7'
@@ -154,16 +152,27 @@ find_dependencies() {
 }
 
 run_extra_cmd() {
+    # Run pre/post-install commands quietly on success, verbose on failure:
+    # capture combined stdout+stderr and only replay it if the command fails.
+    # Keeps CI logs terse for the golden path while preserving debug context.
     command=$(jq -r ".command // empty" <<< "$1")
     if [[ ! -z "$command" ]]; then
-        bash -c "$command"
+        echo "pre/post-install | $command"
+        if ! output=$(bash -c "$command" 2>&1); then
+            echo "$output" >&2
+            return 1
+        fi
     fi
 
     script=$(jq -r ".script // empty" <<< "$1")
     if [[ ! -z "$script" ]]; then
         script_file="$DIR/../scripts/$script"
         chmod +x "$script_file"
-        bash -c "$script_file"
+        echo "pre/post-install | $script"
+        if ! output=$(bash -c "$script_file" 2>&1); then
+            echo "$output" >&2
+            return 1
+        fi
     fi
 }
 
