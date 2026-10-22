@@ -1,0 +1,19 @@
+  {
+    "patterns": ["\\bipopt\\b"],
+    "dependencies": [
+      {
+        "packages": ["coinor-libipopt-dev"],
+        "constraints": [
+          { "os": "linux", "distribution": "ubuntu" },
+          { "os": "linux", "distribution": "debian" }
+        ]
+      },
+      {
+        "packages": ["coin-or-Ipopt-devel"],
+        "constraints": [
+          { "os": "linux", "distribution": "fedora" }
+        ]
+      }
+    ]
+  }
+
